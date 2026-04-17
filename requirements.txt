@@ -1,0 +1,13 @@
+numpy
+opencv-python
+onnxruntime-gpu
+Pillow
+pdfplumber
+huggingface_hub
+shapely
+pyclipper
+ruamel.yaml
+cachetools
+six
+vietocr==0.3.13
+ollama==0.6.1
