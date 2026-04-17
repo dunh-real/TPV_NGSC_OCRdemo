@@ -1,33 +1,54 @@
+import logging
+import os
 from fpdf import FPDF
 
-def txt_to_pdf(input_txt, output_pdf):
-    pdf = FPDF()
-    pdf.add_page()
+FONT_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts", "DejaVuSans.ttf")
+OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "result_pdf"))
 
-    # NOTE: Thêm font chữ hỗ trợ tiếng Việt
-    # NOTE: Cần đường dẫn đến file .ttf trên máy tính của con vợ
-    # Windows thường để ở: C:\Windows\Fonts\arial.ttf
-    try:
-        pdf.add_font('Arial', '', r"C:\Windows\Fonts\arial.ttf")
-        pdf.set_font('Arial', size=12)
-    except:
-        print("Không tìm thấy font Arial, đang sử dụng font mặc định (có thể lỗi dấu)")
-        pdf.set_font("Helvetica", size=12)
 
-    try:
-        with open(input_txt, "r", encoding="utf-8") as f:
-            for line in f:
-                # multi_cell tự động xuống dòng nếu văn bản quá dài
-                pdf.multi_cell(0, 5, txt=line)
+class TxtToPdfService:
+    def __init__(self):
+        self.font_path = os.path.abspath(FONT_PATH)
+        if not os.path.isfile(self.font_path):
+            raise FileNotFoundError(f"Font not found: {self.font_path}")
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        logging.info(f"[TxtToPdfService] Ready. Font: {self.font_path}")
 
-        pdf.output(output_pdf)
-        print(f"Thành công! File PDF đã được lưu tại: {output_pdf}")
-        
-    except FileNotFoundError:
-        print("Lỗi: Không tìm thấy file đầu vào.")
-    except Exception as e:
-        print(f"Đã xảy ra lỗi: {e}")
+    def convert(self, md_path: str) -> str:
+        """
+        Chuyển file markdown/txt (output của OCRService) sang PDF.
 
-input_file = "./BA_05.2021.DS-ST.pdf_0.jpg.txt"
-output_file = "tai_lieu_output(2).pdf"
-txt_to_pdf(input_file, output_file)
+        Args:
+            md_path: Đường dẫn tới file .md từ OCRService.
+
+        Returns:
+            Đường dẫn tới file PDF output.
+        """
+        if not os.path.isfile(md_path):
+            raise FileNotFoundError(f"Input file not found: {md_path}")
+
+        file_name = os.path.splitext(os.path.basename(md_path))[0]
+        pdf_path = os.path.join(OUTPUT_DIR, f"{file_name}.pdf")
+
+        with open(md_path, encoding="utf-8") as f:
+            lines = f.readlines()
+
+        pdf = FPDF()
+        pdf.add_font("DejaVu", "", self.font_path)
+        pdf.set_margins(left=15, top=15, right=15)
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+        pdf.set_font("DejaVu", size=11)
+
+        for line in lines:
+            line = line.rstrip("\n")
+            if line.startswith("---"):
+                pdf.add_page()
+                pdf.set_font("DejaVu", size=11)
+            else:
+                pdf.multi_cell(0, 6, text=line)
+                pdf.set_x(pdf.l_margin)
+
+        pdf.output(pdf_path)
+        logging.info(f"[TxtToPdfService] Saved → {pdf_path}")
+        return pdf_path

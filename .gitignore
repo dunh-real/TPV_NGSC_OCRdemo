@@ -1,18 +1,49 @@
-# Python-generated files
+# Python
 __pycache__/
 *.py[oc]
+*.pyo
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
 .python-version
 pyproject.toml
 
 # Virtual environments
-.venv
+.venv/
 
-# data
-data
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# dependencies
-bin
+# OS
+.DS_Store
+Thumbs.db
+
+# Data - raw input & outputs (không commit dữ liệu thực tế)
+data/raw/
+data/result_ocr/*.md
+data/result_extract/*.json
+data/result_pdf/*.pdf
+
+# Giữ lại cấu trúc thư mục
+!data/result_ocr/.gitkeep
+!data/result_extract/.gitkeep
+!data/result_pdf/.gitkeep
+
+# Model weights (quá nặng)
+src/models/deepdoc_vietocr/onnx/*.onnx
+src/models/deepdoc_vietocr/onnx/*.res
+src/models/deepdoc_vietocr/vietocr/weight/*.pth
+
+# Output thừa từ quá trình dev
+src/services/*.pdf
+src/services/*.txt
+*.pdf
+*.log
+
+# Temp files
+/tmp/
+*.tmp

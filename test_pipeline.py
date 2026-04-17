@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from services.ocr_service import OCRService
 from services.llm_service import LLMService
+from services.txt_to_pdf_service import TxtToPdfService
 
 PDF_PATH = os.path.join(os.path.dirname(__file__), "data", "raw", "BA_05.2021.DS-ST.pdf")
 EXTRACT_DIR = os.path.join(os.path.dirname(__file__), "data", "result_extract")
@@ -20,6 +21,7 @@ def test_pipeline():
 
     ocr_service = OCRService()
     llm_service = LLMService()
+    pdf_service = TxtToPdfService()
 
     # --- OCR ---
     print(f"\n{'='*60}")
@@ -52,9 +54,21 @@ def test_pipeline():
     assert os.path.isfile(json_path), f"JSON output not created: {json_path}"
     print(f"✓ LLM extract done in {llm_elapsed:.2f}s → {json_path}")
 
+    # --- TXT to PDF ---
+    print(f"\n{'='*60}")
+    print("STEP 3: Convert OCR result to PDF")
+    print(f"{'='*60}")
+
+    t0 = time.time()
+    result_pdf_path = pdf_service.convert(md_path)
+    pdf_elapsed = time.time() - t0
+
+    assert os.path.isfile(result_pdf_path), f"PDF output not created: {result_pdf_path}"
+    print(f"✓ PDF done in {pdf_elapsed:.2f}s → {result_pdf_path}")
+
     # --- Summary ---
     print(f"\n{'='*60}")
-    print(f"✓ Total: {ocr_elapsed + llm_elapsed:.2f}s")
+    print(f"✓ Total: {ocr_elapsed + llm_elapsed + pdf_elapsed:.2f}s")
     print(f"{'='*60}")
     print("\n--- Extracted fields ---")
     for k, v in result.items():
