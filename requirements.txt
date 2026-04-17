@@ -7,7 +7,10 @@ certifi==2026.2.25
 charset-normalizer==3.4.7
 click==8.3.2
 colorama==0.4.6
+defusedxml==0.7.1
 filelock==3.25.2
+fonttools==4.62.1
+fpdf2==2.8.7
 fsspec==2026.2.0
 h11==0.16.0
 hf-xet==1.4.3
