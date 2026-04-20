@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 import sys
 import re
@@ -36,14 +37,16 @@ class OCRService:
             pdf.close()
         return images
 
-    def _extract_table_markdown(self, img: Image.Image, table_region: dict) -> str:
+    def _extract_table_blocks(self, img: Image.Image, table_region: dict, page_offset_x: int, page_offset_y: int) -> list[dict]:
+        """Trả về list block từ vùng bảng, tọa độ đã được offset về page gốc."""
         x0, y0, x1, y1 = map(int, table_region["bbox"])
         table_img = img.crop((x0, y0, x1, y1))
         tb_cpns = self.tsr([table_img])[0]
         boxes = self.ocr(np.array(table_img))
         if not boxes:
-            return ""
-        boxes = LayoutRecognizer.sort_Y_firstly(
+            return []
+
+        sorted_boxes = LayoutRecognizer.sort_Y_firstly(
             [{"x0": b[0][0], "x1": b[1][0],
               "top": b[0][1], "text": t[0],
               "bottom": b[-1][1],
@@ -55,16 +58,16 @@ class OCRService:
         def gather(kwd, fzy=10, ption=0.6):
             eles = LayoutRecognizer.sort_Y_firstly(
                 [r for r in tb_cpns if re.match(kwd, r["label"])], fzy)
-            eles = LayoutRecognizer.layouts_cleanup(boxes, eles, 5, ption)
+            eles = LayoutRecognizer.layouts_cleanup(sorted_boxes, eles, 5, ption)
             return LayoutRecognizer.sort_Y_firstly(eles, 0)
 
         headers = gather(r".*header$")
         rows = gather(r".* (row|header)")
         spans = gather(r".*spanning")
         clmns = sorted([r for r in tb_cpns if re.match(r"table column$", r["label"])], key=lambda x: x["x0"])
-        clmns = LayoutRecognizer.layouts_cleanup(boxes, clmns, 5, 0.5)
+        clmns = LayoutRecognizer.layouts_cleanup(sorted_boxes, clmns, 5, 0.5)
 
-        for b in boxes:
+        for b in sorted_boxes:
             ii = LayoutRecognizer.find_overlapped_with_threashold(b, rows, thr=0.3)
             if ii is not None:
                 b["R"] = ii; b["R_top"] = rows[ii]["top"]; b["R_bott"] = rows[ii]["bottom"]
@@ -80,53 +83,91 @@ class OCRService:
                 b["H_top"] = spans[ii]["top"]; b["H_bott"] = spans[ii]["bottom"]
                 b["H_left"] = spans[ii]["x0"]; b["H_right"] = spans[ii]["x1"]; b["SP"] = ii
 
-        return TableStructureRecognizer.construct_table(boxes, markdown=True)
+        markdown = TableStructureRecognizer.construct_table(sorted_boxes, markdown=True)
 
-    def _process_page(self, img: Image.Image, page_idx: int, threshold: float = 0.5) -> str:
-        layouts = self.layout_recognizer.forward([np.array(img)], thr=threshold)[0]
+        # Trả về 1 block đại diện cho toàn bộ bảng với tọa độ page gốc
+        return [{
+            "text": markdown,
+            "x0": x0 + page_offset_x,
+            "y0": y0 + page_offset_y,
+            "x1": x1 + page_offset_x,
+            "y1": y1 + page_offset_y,
+            "type": "table",
+        }]
+
+    def _process_page(self, img: Image.Image, page_idx: int, threshold: float = 0.5) -> dict:
+        """
+        Xử lý một trang, trả về dict chứa kích thước trang và list các block có bbox.
+        """
+        img_w, img_h = img.size
+        img_arr = np.array(img)
+        layouts = self.layout_recognizer.forward([img_arr], thr=threshold)[0]
 
         mask = Image.new("1", img.size, 0)
         draw = ImageDraw.Draw(mask)
-        region_and_pos = []
+        blocks = []
 
         for region in layouts:
             bbox = region.get("bbox", [region.get("x0", 0), region.get("top", 0),
                                        region.get("x1", 0), region.get("bottom", 0)])
-            x0, y0, x1, y1 = map(int, bbox)
-            draw.rectangle([x0, y0, x1, y1], fill=1)
+            rx0, ry0, rx1, ry1 = map(int, bbox)
+            draw.rectangle([rx0, ry0, rx1, ry1], fill=1)
 
             if region.get("type", "").lower() == "table" and region.get("score", 1.0) >= threshold:
                 region["bbox"] = bbox
-                md = self._extract_table_markdown(img, region)
-                region_and_pos.append((y0, md))
+                table_blocks = self._extract_table_blocks(img, region, 0, 0)
+                blocks.extend(table_blocks)
 
+        # OCR vùng không phải table (text, title, ...)
         inv_mask = mask.point(lambda p: 1 - p)
         if inv_mask.getbbox():
-            x0, y0, x1, y1 = inv_mask.getbbox()
-            ocr_results = self.ocr(np.array(img.crop((x0, y0, x1, y1))))
+            cx0, cy0, cx1, cy1 = inv_mask.getbbox()
+            crop_arr = np.array(img.crop((cx0, cy0, cx1, cy1)))
+            ocr_results = self.ocr(crop_arr)
             if ocr_results:
-                text = "\n".join([t[0] for _, t in ocr_results if t and t[0]])
-                region_and_pos.append((y0, text))
+                for box, (text, score) in ocr_results:
+                    if not text:
+                        continue
+                    # box là tọa độ trong crop → offset về page gốc
+                    bx0 = box[0][0] + cx0
+                    by0 = box[0][1] + cy0
+                    bx1 = box[1][0] + cx0
+                    by1 = box[-1][1] + cy0
+                    blocks.append({
+                        "text": text,
+                        "x0": float(bx0),
+                        "y0": float(by0),
+                        "x1": float(bx1),
+                        "y1": float(by1),
+                        "type": "text",
+                    })
 
-        region_and_pos.sort(key=lambda x: x[0])
-        return "\n\n".join([item[1] for item in region_and_pos if item[1].strip()])
+        # Sort theo y0 rồi x0
+        blocks.sort(key=lambda b: (b["y0"], b["x0"]))
+
+        return {
+            "page": page_idx + 1,
+            "width": img_w,
+            "height": img_h,
+            "blocks": blocks,
+        }
 
     def process(self, pdf_path: str, threshold: float = 0.5) -> str:
         """
-        OCR một file PDF, lưu kết quả markdown vào OUTPUT_DIR.
+        OCR một file PDF, lưu kết quả JSON (có bbox) vào OUTPUT_DIR.
 
         Args:
             pdf_path: Đường dẫn tuyệt đối tới file PDF.
             threshold: Ngưỡng confidence cho layout detection (default 0.5).
 
         Returns:
-            Đường dẫn tới file markdown kết quả.
+            Đường dẫn tới file JSON kết quả.
         """
         if not os.path.isfile(pdf_path):
             raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
         pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        out_path = os.path.join(OUTPUT_DIR, f"{pdf_name}.md")
+        out_path = os.path.join(OUTPUT_DIR, f"{pdf_name}.json")
 
         logging.info(f"[OCRService] Processing: {pdf_path}")
         total_start = time.time()
@@ -134,16 +175,32 @@ class OCRService:
         images = self._pdf_to_images(pdf_path)
         logging.info(f"[OCRService] {len(images)} pages loaded.")
 
-        page_results = []
+        pages = []
         for idx, img in enumerate(images):
             t0 = time.time()
-            md = self._process_page(img, idx, threshold)
-            page_results.append(f"<!-- Page {idx + 1} -->\n{md}")
-            logging.info(f"[OCRService] Page {idx + 1}/{len(images)} done in {time.time() - t0:.2f}s")
+            page_data = self._process_page(img, idx, threshold)
+            pages.append(page_data)
+            logging.info(f"[OCRService] Page {idx + 1}/{len(images)} done in {time.time() - t0:.2f}s — {len(page_data['blocks'])} blocks")
 
-        final_markdown = "\n\n---\n\n".join(page_results)
+        result = {"pages": pages}
         with open(out_path, "w", encoding="utf-8") as f:
-            f.write(final_markdown)
+            json.dump(result, f, ensure_ascii=False, indent=2)
 
         logging.info(f"[OCRService] Done in {time.time() - total_start:.2f}s → {out_path}")
         return out_path
+
+    @staticmethod
+    def to_plain_text(ocr_json_path: str) -> str:
+        """
+        Chuyển file JSON OCR thành plain text để đưa vào LLM.
+        Giữ nguyên thứ tự đọc (top-to-bottom), phân trang bằng dấu ---
+        """
+        with open(ocr_json_path, encoding="utf-8") as f:
+            data = json.load(f)
+
+        pages_text = []
+        for page in data["pages"]:
+            lines = [b["text"] for b in page["blocks"] if b["text"].strip()]
+            pages_text.append(f"<!-- Page {page['page']} -->\n" + "\n".join(lines))
+
+        return "\n\n---\n\n".join(pages_text)

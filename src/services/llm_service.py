@@ -145,20 +145,30 @@ class LLMService:
         except json.JSONDecodeError:
             return {"raw": raw}
 
-    def extract_from_file(self, md_path: str) -> dict:
+    def extract_from_file(self, ocr_json_path: str) -> dict:
         """
-        Đọc file markdown OCR rồi extract thông tin.
+        Đọc file JSON OCR rồi extract thông tin.
+        Tự detect format: OCRService (có 'pages[].blocks') hoặc Qwen35 (có 'pages[].text').
 
         Args:
-            md_path: Đường dẫn tới file .md từ OCRService.
+            ocr_json_path: File .json từ OCRService hoặc Qwen35OcrService.
 
         Returns:
             Dict chứa các trường thông tin được extract.
         """
-        if not os.path.isfile(md_path):
-            raise FileNotFoundError(f"OCR result file not found: {md_path}")
+        if not os.path.isfile(ocr_json_path):
+            raise FileNotFoundError(f"OCR result file not found: {ocr_json_path}")
 
-        with open(md_path, encoding="utf-8") as f:
-            ocr_text = f.read()
+        with open(ocr_json_path, encoding="utf-8") as f:
+            data = json.load(f)
+
+        pages = data.get("pages", [])
+
+        if pages and "text" in pages[0]:
+            from services.qwen35_ocr_service import Qwen35OcrService
+            ocr_text = Qwen35OcrService.to_plain_text(ocr_json_path)
+        else:
+            from services.ocr_service import OCRService
+            ocr_text = OCRService.to_plain_text(ocr_json_path)
 
         return self.extract(ocr_text)

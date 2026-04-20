@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from services.ocr_service import OCRService
 from services.llm_service import LLMService
-from services.txt_to_pdf_service import TxtToPdfService
+from services.ocr_to_pdf_service import OcrToPdfService
 
 PDF_PATH = os.path.join(os.path.dirname(__file__), "data", "raw", "BA_05.2021.DS-ST.pdf")
 EXTRACT_DIR = os.path.join(os.path.dirname(__file__), "data", "result_extract")
@@ -21,7 +21,7 @@ def test_pipeline():
 
     ocr_service = OCRService()
     llm_service = LLMService()
-    pdf_service = TxtToPdfService()
+    pdf_service = OcrToPdfService()
 
     # --- OCR ---
     print(f"\n{'='*60}")
@@ -29,11 +29,11 @@ def test_pipeline():
     print(f"{'='*60}")
 
     t0 = time.time()
-    md_path = ocr_service.process(PDF_PATH)
+    ocr_json_path = ocr_service.process(PDF_PATH)
     ocr_elapsed = time.time() - t0
 
-    assert os.path.isfile(md_path), f"OCR output not found: {md_path}"
-    print(f"✓ OCR done in {ocr_elapsed:.2f}s → {md_path}")
+    assert os.path.isfile(ocr_json_path), f"OCR output not found: {ocr_json_path}"
+    print(f"✓ OCR done in {ocr_elapsed:.2f}s → {ocr_json_path}")
 
     # --- LLM Extract ---
     print(f"\n{'='*60}")
@@ -41,7 +41,7 @@ def test_pipeline():
     print(f"{'='*60}")
 
     t0 = time.time()
-    result = llm_service.extract_from_file(md_path)
+    result = llm_service.extract_from_file(ocr_json_path)
     llm_elapsed = time.time() - t0
 
     assert isinstance(result, dict), "LLM result is not a dict"
@@ -60,7 +60,7 @@ def test_pipeline():
     print(f"{'='*60}")
 
     t0 = time.time()
-    result_pdf_path = pdf_service.convert(md_path)
+    result_pdf_path = pdf_service.convert(ocr_json_path)
     pdf_elapsed = time.time() - t0
 
     assert os.path.isfile(result_pdf_path), f"PDF output not created: {result_pdf_path}"
