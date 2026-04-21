@@ -58,3 +58,6 @@ data/result_ocr/*.json
 # Temp files
 /tmp/
 *.tmp
+
+# dependencies
+bin
