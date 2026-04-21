@@ -51,6 +51,7 @@ src/services/vlm_style_service.py
 src/services/qwen35_ocr_service.py
 test_vlm_pipeline.py
 test_qwen35_pipeline.py
+plan.md
 
 # OCR output JSON (sinh ra tự động)
 data/result_ocr/*.json

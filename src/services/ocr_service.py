@@ -157,7 +157,7 @@ class OCRService:
         OCR một file PDF, lưu kết quả JSON (có bbox) vào OUTPUT_DIR.
 
         Args:
-            pdf_path: Đường dẫn tuyệt đối tới file PDF.
+            pdf_path:  Đường dẫn tuyệt đối tới file PDF.
             threshold: Ngưỡng confidence cho layout detection (default 0.5).
 
         Returns:
