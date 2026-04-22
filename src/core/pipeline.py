@@ -1,11 +1,10 @@
 import json
-import logging
 import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from services.ocr_service import OCRService
+from services.qwen36_ocr_service import Qwen36OcrService
 from services.llm_service import LLMService
 from services.ocr_to_pdf_service import OcrToPdfService
 
@@ -14,7 +13,8 @@ EXTRACT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."
 
 class OCRPipeline:
     def __init__(self):
-        self.ocr_service = OCRService()
+        # VietOCR (layout/bbox) + Qwen3.6 (OCR text) tích hợp trong Qwen36OcrService
+        self.ocr_service = Qwen36OcrService()
         self.llm_service = LLMService()
         self.pdf_service = OcrToPdfService()
         os.makedirs(EXTRACT_DIR, exist_ok=True)
@@ -35,16 +35,18 @@ class OCRPipeline:
 
         pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
 
+        # VietOCR detect bbox → Qwen3.6 OCR text → JSON
         ocr_json = self.ocr_service.process(pdf_path)
 
+        # LLM extract thông tin
         extract_result = self.llm_service.extract_from_file(ocr_json)
 
         extract_json = os.path.join(EXTRACT_DIR, f"{pdf_name}.json")
-
         with open(extract_json, "w", encoding="utf-8") as f:
             json.dump(extract_result, f, ensure_ascii=False, indent=2)
 
-        result_pdf = self.pdf_service.convert(ocr_json)
+        # Render PDF với FontStyleService (rule-based)
+        result_pdf = self.pdf_service.convert(ocr_json, pdf_raw_path=pdf_path)
 
         return {
             "extract_json": extract_json,

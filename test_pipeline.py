@@ -12,7 +12,7 @@ from services.ocr_service import OCRService
 from services.llm_service import LLMService
 from services.ocr_to_pdf_service import OcrToPdfService
 
-PDF_PATH = os.path.join(os.path.dirname(__file__), "data", "raw", "BA_05.2021.DS-ST.pdf")
+PDF_PATH = os.path.join(os.path.dirname(__file__), "data", "raw", "BA_CHINH_HUYNH_CHAN.pdf")
 EXTRACT_DIR = os.path.join(os.path.dirname(__file__), "data", "result_extract")
 
 
@@ -54,7 +54,7 @@ def test_pipeline():
     assert os.path.isfile(json_path), f"JSON output not created: {json_path}"
     print(f"✓ LLM extract done in {llm_elapsed:.2f}s → {json_path}")
 
-    # --- TXT to PDF ---
+    # --- OCR to PDF ---
     print(f"\n{'='*60}")
     print("STEP 3: Convert OCR result to PDF")
     print(f"{'='*60}")

@@ -168,6 +168,7 @@ class LLMService:
             from services.qwen35_ocr_service import Qwen35OcrService
             ocr_text = Qwen35OcrService.to_plain_text(ocr_json_path)
         else:
+            # OCRService format (pages[].blocks) — dùng cho cả deepdoc và qwen36
             from services.ocr_service import OCRService
             ocr_text = OCRService.to_plain_text(ocr_json_path)
 
