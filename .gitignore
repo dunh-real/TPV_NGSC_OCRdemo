@@ -27,11 +27,13 @@ data/raw/
 data/result_ocr/*.md
 data/result_extract/*.json
 data/result_pdf/*.pdf
+data/result_tiff/*.tiff
 
 # Giữ lại cấu trúc thư mục
 !data/result_ocr/.gitkeep
 !data/result_extract/.gitkeep
 !data/result_pdf/.gitkeep
+!data/result_tiff/.gitkeep
 
 # Model weights (quá nặng)
 src/models/deepdoc_vietocr/onnx/*.onnx
