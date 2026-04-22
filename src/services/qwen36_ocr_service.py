@@ -196,7 +196,7 @@ class Qwen36OcrService:
             raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
         pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        out_path = os.path.join(OUTPUT_DIR, f"{pdf_name}_qwen36.json")
+        out_path = os.path.join(OUTPUT_DIR, f"{pdf_name}.json")
 
         logger.info(f"[Qwen36] Processing: {pdf_path}")
         t0 = time.time()
@@ -233,14 +233,3 @@ class Qwen36OcrService:
             json.dump({"pages": pages}, f, ensure_ascii=False, indent=2)
 
         return out_path
-
-    @staticmethod
-    def to_plain_text(json_path: str) -> str:
-        with open(json_path, encoding="utf-8") as f:
-            data = json.load(f)
-        parts = []
-        for page in data.get("pages", []):
-            lines = [b["text"] for b in page.get("blocks", []) if b.get("text", "").strip()]
-            if lines:
-                parts.append(f"<!-- Page {page['page']} -->\n" + "\n".join(lines))
-        return "\n\n---\n\n".join(parts)

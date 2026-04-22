@@ -21,6 +21,10 @@ Input PDF
    ReportLab render PDF A4, font Times New Roman
    Output: data/result_pdf/<name>_qwen36.pdf
    ↓
+[PDF to TIFF] src/services/pdf_to_tiff_service.py
+   Convert PDF → TIFF multi-page, 300 DPI, nén LZW
+   Output: data/result_tiff/<name>_qwen36.tiff
+   ↓
 [LLM Extract] src/services/llm_service.py
    Ollama (qwen2.5:7b) extract các trường thông tin cố định
    Output: data/result_extract/<name>.json
