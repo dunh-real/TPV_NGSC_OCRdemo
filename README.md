@@ -11,7 +11,7 @@ Input PDF
 [OCR Text] src/services/qwen36_ocr_service.py
    Crop từng bbox → gộp thành grid ảnh → gửi Qwen3.6-35B-A3B (vLLM)
    Qwen3.6 OCR text chính xác tiếng Việt cho từng dòng
-   Output: data/result_ocr/<name>_qwen36.json
+   Output: data/result_ocr/<name>.json
    ↓
 [Font & Style] src/services/font_style_service.py
    Rule-based theo Thông tư 01/2011/TT-BNV
@@ -19,14 +19,14 @@ Input PDF
    ↓
 [Render PDF] src/services/ocr_to_pdf_service.py
    ReportLab render PDF A4, font Times New Roman
-   Output: data/result_pdf/<name>_qwen36.pdf
+   Output: data/result_pdf/<name>.pdf
    ↓
 [PDF to TIFF] src/services/pdf_to_tiff_service.py
    Convert PDF → TIFF multi-page, 300 DPI, nén LZW
-   Output: data/result_tiff/<name>_qwen36.tiff
+   Output: data/result_tiff/<name>.tiff
    ↓
 [LLM Extract] src/services/llm_service.py
-   Ollama (qwen2.5:7b) extract các trường thông tin cố định
+   Ollama (qwen2.5:14b) extract các trường thông tin cố định
    Output: data/result_extract/<name>.json
 ```
 
@@ -42,5 +42,5 @@ Input PDF
 ## Cấu hình
 
 - **Qwen3.6 server**: set env `QWEN36_OCR_URL` (default: `https://vks-ocr-hvks.loca.lt`)
-- **Ollama**: chạy local tại `http://localhost:11434`, model `qwen2.5:7b`
+- **Ollama**: chạy local tại `http://localhost:11434`, model `qwen2.5:14b`
 - **DPI ảnh**: 216 DPI (72 × 3) — khớp giữa layout detection và render PDF

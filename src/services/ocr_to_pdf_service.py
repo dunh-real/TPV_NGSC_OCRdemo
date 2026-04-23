@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -41,17 +42,23 @@ def _pick_font(bold: bool, italic: bool) -> str:
 
 
 class OcrToPdfService:
-    def __init__(self, margin: float = 20.0):
+    def __init__(self, margin: float = 20.0, line_spacing: float = 1.1):
         for path in [FONT_PATH, FONT_PATH_BOLD, FONT_PATH_ITALIC, FONT_PATH_BOLD_ITALIC]:
             if not os.path.isfile(path):
                 raise FileNotFoundError(f"Font not found: {path}")
         _register_font()
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        self.margin = margin
+        self.margin       = margin
+        self.line_spacing = line_spacing
         logging.info("[OcrToPdfService] Ready.")
 
-    def _scale(self, val: float, src_dim: float, dst_dim: float) -> float:
+    def _scale_x(self, val: float, src_dim: float, dst_dim: float) -> float:
         return (val / src_dim) * (dst_dim - 2 * self.margin) + self.margin
+
+    def _scale_y(self, val: float, src_dim: float, dst_dim: float) -> float:
+        center = (dst_dim - 2 * self.margin) / 2 + self.margin
+        scaled = (val / src_dim) * (dst_dim - 2 * self.margin) + self.margin
+        return center + (scaled - center) * self.line_spacing
 
     def _render_page(self, c: canvas.Canvas, page: dict):
         src_w = page["width"]
@@ -62,10 +69,10 @@ class OcrToPdfService:
             if not text:
                 continue
 
-            x0 = self._scale(block["x0"], src_w, A4_W)
-            y0 = self._scale(block["y0"], src_h, A4_H)
-            x1 = self._scale(block["x1"], src_w, A4_W)
-            y1 = self._scale(block["y1"], src_h, A4_H)
+            x0 = self._scale_x(block["x0"], src_w, A4_W)
+            y0 = self._scale_y(block["y0"], src_h, A4_H)
+            x1 = self._scale_x(block["x1"], src_w, A4_W)
+            y1 = self._scale_y(block["y1"], src_h, A4_H)
             pdf_y = A4_H - y1
 
             style     = block.get("style", {})
@@ -100,7 +107,7 @@ class OcrToPdfService:
                     c.setLineWidth(0.5)
                     c.line(lx0, ly - font_size * 0.15, lx1, ly - font_size * 0.15)
 
-    def convert(self, ocr_json_path: str, pdf_raw_path: str = None) -> str:
+    def convert(self, ocr_json_path: str) -> str:
         if not os.path.isfile(ocr_json_path):
             raise FileNotFoundError(f"OCR JSON not found: {ocr_json_path}")
 
@@ -110,14 +117,6 @@ class OcrToPdfService:
         _style_svc.enrich(data)
 
         pdf_name = os.path.splitext(os.path.basename(ocr_json_path))[0]
-        if pdf_raw_path is None:
-            base    = pdf_name
-            raw_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw"))
-            for suffix in ("_qwen36", "_vlm", "_ocr"):
-                if base.endswith(suffix):
-                    base = base[:-len(suffix)]
-                    break
-            pdf_raw_path = os.path.join(raw_dir, base + ".pdf")
 
         pdf_path = os.path.join(OUTPUT_DIR, f"{pdf_name}.pdf")
 
@@ -128,4 +127,5 @@ class OcrToPdfService:
 
         c.save()
         logging.info(f"[OcrToPdfService] Saved → {pdf_path}")
+        
         return pdf_path

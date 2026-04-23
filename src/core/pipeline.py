@@ -47,7 +47,7 @@ class OCRPipeline:
             json.dump(extract_result, f, ensure_ascii=False, indent=2)
 
         # Render PDF với FontStyleService (rule-based)
-        result_pdf  = self.pdf_service.convert(ocr_json, pdf_raw_path=pdf_path)
+        result_pdf  = self.pdf_service.convert(ocr_json)
         
         # Convert PDF → TIFF multi-page
         result_tiff = self.tiff_service.convert(result_pdf)

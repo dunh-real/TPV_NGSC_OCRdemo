@@ -36,12 +36,6 @@ def _detect_alignment(x0: float, x1: float, page_w: float) -> str:
     return "left"
 
 
-def _font_size_from_height(block_h: float) -> float:
-    if block_h >= 85: return 16.0
-    if block_h >= 72: return 14.0
-    if block_h >= 55: return 13.0
-    return 12.0
-
 
 def infer_style(block: dict, page_w: float, page_h: float,
                 page_blocks: list = None) -> BlockStyle:
@@ -55,7 +49,7 @@ def infer_style(block: dict, page_w: float, page_h: float,
 
     style       = BlockStyle()
     style.align = _detect_alignment(x0, x1, page_w)
-    style.size  = _font_size_from_height(blk_h)
+    style.size  = 13.0
 
     # Nơi nhận: bold + italic
     if _RE_NOI_NHAN.match(text):
