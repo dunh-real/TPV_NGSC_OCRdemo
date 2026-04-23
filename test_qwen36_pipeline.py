@@ -44,7 +44,7 @@ def test_pipeline():
     print("STEP 2: Render PDF")
     print(f"{'='*60}")
     t0 = time.time()
-    pdf_path = pdf_svc.convert(ocr_json, pdf_raw_path=PDF_PATH)
+    pdf_path = pdf_svc.convert(ocr_json)
     pdf_elapsed = time.time() - t0
     print(f"✓ PDF done in {pdf_elapsed:.2f}s → {pdf_path}")
 
