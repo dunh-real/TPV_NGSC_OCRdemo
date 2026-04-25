@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -129,9 +130,9 @@ def _call_vllm(session: requests.Session, base_url: str,
     return json.loads(raw)
 
 
-def _assemble_page(blocks: list[TextBlock], text_map: dict,
-                   page_num: int, img_w: int, img_h: int) -> dict:
+def _assemble_page(blocks: list[TextBlock], text_map: dict, page_num: int, img_w: int, img_h: int) -> dict:
     result_blocks = []
+
     for i, blk in enumerate(blocks, start=1):
         text = text_map.get(str(i), "").strip()
         if not text:
@@ -144,6 +145,7 @@ def _assemble_page(blocks: list[TextBlock], text_map: dict,
             "y1":   round(blk.y1, 1),
             "page": page_num,
         })
+
     return {"page": page_num, "width": img_w, "height": img_h, "blocks": result_blocks}
 
 
@@ -152,12 +154,14 @@ class Qwen36OcrService:
                  url: str = SERVER_URL,
                  timeout: int = 300,
                  batch_size: int = 20,
+                 max_concurrent: int = 4,
                  layout_cfg: Optional[LayoutOCRConfig] = None):
-        self.url        = url.rstrip("/")
-        self.timeout    = timeout
-        self.batch_size = batch_size
-        self.session    = _make_session()
-        self.lay_svc    = LayoutOCRService(layout_cfg or LayoutOCRConfig())
+        self.url            = url.rstrip("/")
+        self.timeout        = timeout
+        self.batch_size     = batch_size
+        self.max_concurrent = max_concurrent
+        self.session        = _make_session()
+        self.lay_svc        = LayoutOCRService(layout_cfg or LayoutOCRConfig())
         os.makedirs(OUTPUT_DIR, exist_ok=True)
 
         try:
@@ -166,6 +170,13 @@ class Qwen36OcrService:
             logger.info(f"[Qwen36] Connected. Models: {models}")
         except Exception as e:
             logger.warning(f"[Qwen36] Cannot reach server: {e}")
+
+    def _prepare_all_pages(self, pdf_path: str):
+        """Convert PDF → images + layout detection (blocking)."""
+        with pdfplumber.open(pdf_path) as pdf:
+            images = [p.to_image(resolution=72 * ZOOMIN).annotated for p in pdf.pages]
+        all_blocks = self.lay_svc.process_pages(images)
+        return images, all_blocks
 
     def _ocr_page(self, img: Image.Image, blocks: list[TextBlock]) -> dict:
         text_map = {}
@@ -191,6 +202,69 @@ class Qwen36OcrService:
 
         return text_map
 
+    async def _ocr_page_concurrent(self, img: Image.Image, blocks: list[TextBlock]) -> dict:
+        """OCR all batches of a page concurrently via asyncio.gather."""
+        text_map = {}
+        total    = len(blocks)
+        sem      = asyncio.Semaphore(self.max_concurrent)
+
+        async def _run_batch(start: int, batch: list[TextBlock]):
+            crops   = [_crop_block(img, blk) for blk in batch]
+            grid    = _build_grid(crops, global_start=start)
+            img_b64 = _image_to_base64(grid)
+            prompt  = _build_prompt(global_start=start, batch_size=len(batch))
+
+            async with sem:
+                return await asyncio.to_thread(
+                    _call_vllm, self.session, self.url,
+                    img_b64, prompt, self.timeout,
+                )
+
+        tasks = []
+        for start in range(0, total, self.batch_size):
+            batch = blocks[start:start + self.batch_size]
+            tasks.append((start, len(batch), asyncio.ensure_future(_run_batch(start, batch))))
+
+        for start, batch_len, fut in tasks:
+            try:
+                raw_map = await fut
+                text_map.update(raw_map)
+                logger.debug(f"[Qwen36] batch {start+1}-{start+batch_len}/{total}: {len(raw_map)} keys")
+            except Exception as e:
+                logger.error(f"[Qwen36] batch {start+1}-{start+batch_len}/{total} error: {e}")
+
+        missing = [str(i) for i in range(1, total + 1) if str(i) not in text_map]
+        if missing:
+            logger.warning(f"[Qwen36] {len(missing)} blocks missing: {missing[:10]}")
+
+        return text_map
+
+    def _ocr_single_page(self, img: Image.Image, blocks: list[TextBlock], page_num: int) -> dict:
+        """OCR one page (sync, sequential batches)."""
+        img_w, img_h = img.size
+        if not blocks:
+            logger.warning(f"[Qwen36] Page {page_num}: no blocks")
+            return {"page": page_num, "width": img_w, "height": img_h, "blocks": []}
+        try:
+            text_map = self._ocr_page(img, blocks)
+            return _assemble_page(blocks, text_map, page_num, img_w, img_h)
+        except Exception as e:
+            logger.error(f"[Qwen36] Page {page_num} error: {e}")
+            return {"page": page_num, "width": img_w, "height": img_h, "blocks": []}
+
+    async def _ocr_single_page_async(self, img: Image.Image, blocks: list[TextBlock], page_num: int) -> dict:
+        """OCR one page (async, concurrent batches)."""
+        img_w, img_h = img.size
+        if not blocks:
+            logger.warning(f"[Qwen36] Page {page_num}: no blocks")
+            return {"page": page_num, "width": img_w, "height": img_h, "blocks": []}
+        try:
+            text_map = await self._ocr_page_concurrent(img, blocks)
+            return _assemble_page(blocks, text_map, page_num, img_w, img_h)
+        except Exception as e:
+            logger.error(f"[Qwen36] Page {page_num} error: {e}")
+            return {"page": page_num, "width": img_w, "height": img_h, "blocks": []}
+
     def process(self, pdf_path: str) -> str:
         if not os.path.isfile(pdf_path):
             raise FileNotFoundError(f"PDF not found: {pdf_path}")
@@ -201,31 +275,53 @@ class Qwen36OcrService:
         logger.info(f"[Qwen36] Processing: {pdf_path}")
         t0 = time.time()
 
-        with pdfplumber.open(pdf_path) as pdf:
-            images = [p.to_image(resolution=72 * ZOOMIN).annotated for p in pdf.pages]
-
-        all_blocks = self.lay_svc.process_pages(images)
+        images, all_blocks = self._prepare_all_pages(pdf_path)
 
         pages = []
         for idx, (img, blocks) in enumerate(zip(images, all_blocks)):
-            page_num     = idx + 1
-            img_w, img_h = img.size
-
-            if not blocks:
-                logger.warning(f"[Qwen36] Page {page_num}: no blocks")
-                pages.append({"page": page_num, "width": img_w, "height": img_h, "blocks": []})
-                continue
-
-            try:
-                text_map = self._ocr_page(img, blocks)
-                page     = _assemble_page(blocks, text_map, page_num, img_w, img_h)
-            except Exception as e:
-                logger.error(f"[Qwen36] Page {page_num} error: {e}")
-                page = {"page": page_num, "width": img_w, "height": img_h, "blocks": []}
-
+            page_num = idx + 1
+            page = self._ocr_single_page(img, blocks, page_num)
             pages.append(page)
             logger.info(f"[Qwen36] Page {page_num}/{len(images)} — {len(page['blocks'])} blocks")
 
+        n_total = sum(len(p["blocks"]) for p in pages)
+        logger.info(f"[Qwen36] Done in {time.time()-t0:.2f}s — {len(pages)} pages, {n_total} blocks")
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump({"pages": pages}, f, ensure_ascii=False, indent=2)
+
+        return out_path
+
+    async def process_streaming(self, pdf_path: str, queue: asyncio.Queue) -> str:
+        if not os.path.isfile(pdf_path):
+            raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
+        pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        out_path = os.path.join(OUTPUT_DIR, f"{pdf_name}.json")
+
+        logger.info(f"[Qwen36] Streaming process: {pdf_path}")
+        t0 = time.time()
+
+        # Prep: PDF → images + layout detection (blocking, run in thread)
+        images, all_blocks = await asyncio.to_thread(
+            self._prepare_all_pages, pdf_path
+        )
+
+        pages = []
+        for idx, (img, blocks) in enumerate(zip(images, all_blocks)):
+            page_num = idx + 1
+
+            # OCR per page (concurrent batches within page)
+            page = await self._ocr_single_page_async(img, blocks, page_num)
+
+            pages.append(page)
+            await queue.put(page)
+            logger.info(
+                f"[Qwen36] Page {page_num}/{len(images)} — "
+                f"{len(page['blocks'])} blocks → queued"
+            )
+
+        # Save JSON for PDF/TIFF rendering
         n_total = sum(len(p["blocks"]) for p in pages)
         logger.info(f"[Qwen36] Done in {time.time()-t0:.2f}s — {len(pages)} pages, {n_total} blocks")
 
