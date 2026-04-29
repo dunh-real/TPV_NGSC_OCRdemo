@@ -2,13 +2,14 @@ import asyncio
 import logging
 import os
 import json
-from langchain_ollama import ChatOllama
-from pydantic import BaseModel, Field
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field, field_validator
 from langchain_core.prompts import ChatPromptTemplate
 from typing import Optional, List
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
+VLLM_LLM_URL = os.getenv("VLLM_LLM_URL", "https://vks-llm-hvks.loca.lt/v1")
+VLLM_LLM_MODEL = os.getenv("VLLM_LLM_MODEL", "Qwen/Qwen2.5-14B-Instruct")
+_LLM_HEADERS = {"bypass-tunnel-reminder": "true"}
 
 class DiaChi(BaseModel):
     """Cấu trúc dùng chung cho các trường địa chỉ (Cấp tỉnh, huyện, xã, chi tiết)"""
@@ -62,6 +63,12 @@ class ThongTinKetAn(BaseModel):
     thoi_han_gia_tri_hinh_phat_bo_sung: Optional[str] = Field(None, description="Thời hạn/giá trị hình phạt bổ sung")
     an_phi: Optional[str] = Field(None, description="Án phí phải nộp")
     mien_phi: Optional[str] = Field(None, description="Miễn phí (án phí/lệ phí)")
+
+    @field_validator('ten_toi_danh', 'dieu_khoan_luat_ap_dung', 'ten_hinh_phat_bo_sung', mode='before')
+    @classmethod
+    def null_to_empty_list(cls, v):
+        """LLM trả null thay vì [] khi không có dữ liệu."""
+        return v if v is not None else []
 
 class ThongTinBiCao(BaseModel):
     """Thông tin cá nhân của đương sự/bị cáo (Nguyên đơn, Bị đơn, Bị cáo, ...)."""
@@ -126,31 +133,41 @@ class DuLieuBanAn(BaseModel):
     )
 
 class LLMService:
-    def __init__(self, host: str = OLLAMA_HOST, model: str = OLLAMA_MODEL, stream_num_ctx: int = 8192):
-        # Sync pipeline
-        llm = ChatOllama(
+    def __init__(self, base_url: str = VLLM_LLM_URL, model: str = VLLM_LLM_MODEL):
+        # Sync pipeline (full-document)
+        llm = ChatOpenAI(
             model=model,
-            base_url=host,
+            base_url=base_url,
+            api_key="not-needed",
             temperature=0,
-            num_ctx=16384,
-            num_predict=4096,
+            max_tokens=4096,
+            timeout=120,
+            default_headers=_LLM_HEADERS,
         )
-        self.structured_llm = llm.with_structured_output(DuLieuBanAn)
+        self.structured_llm = llm.with_structured_output(DuLieuBanAn, method="json_mode")
 
-        # Async pipeline - Streaming LLM
-        stream_llm = ChatOllama(
+        # Async pipeline (streaming, sliding window)
+        stream_llm = ChatOpenAI(
             model=model,
-            base_url=host,
+            base_url=base_url,
+            api_key="not-needed",
             temperature=0,
-            num_ctx=stream_num_ctx,
-            num_predict=4096,
+            max_tokens=4096,
+            timeout=120,
+            default_headers=_LLM_HEADERS,
         )
-        self.stream_structured_llm = stream_llm.with_structured_output(DuLieuBanAn)
+        self.stream_structured_llm = stream_llm.with_structured_output(DuLieuBanAn, method="json_mode")
+
+        # Full JSON schema from Pydantic — ensures exact field names for merge logic
+        _schema = json.dumps(
+            DuLieuBanAn.model_json_schema(),
+            ensure_ascii=False, indent=2,
+        ).replace("{", "{{").replace("}", "}}")
 
         self._system_prompt = (
             "Bạn là Chuyên gia Trích xuất Dữ liệu Pháp lý.\n"
             "Nhiệm vụ: Đọc nội dung OCR từ bản án/quyết định của tòa án Việt Nam "
-            "và trích xuất thông tin chính xác theo schema.\n\n"
+            "và trích xuất thông tin chính xác theo JSON schema bên dưới.\n\n"
             "QUY TẮC BẮT BUỘC:\n"
             "1. Mỗi CÁ NHÂN (đương sự/bị cáo/bị đơn/nguyên đơn) = 1 phần tử trong danh_sach_doi_tuong.\n"
             "2. PHẢI điền ho_va_ten vào bi_cao_vn (nếu là người VN) hoặc bi_cao_nuoc_ngoai (nếu là người nước ngoài). "
@@ -160,9 +177,10 @@ class LLMService:
             "4. phap_nhan_pham_toi chỉ dùng cho DOANH NGHIỆP/TỔ CHỨC bị xét xử. "
             "KHÔNG điền vai trò tố tụng (Nguyên đơn, Bị đơn, Người có quyền lợi nghĩa vụ liên quan) vào đây.\n"
             "5. Nếu thông tin không có trong văn bản → null. Không bịa đặt. KHÔNG được ghi 'Không rõ', 'không xác định' hay bất kỳ chuỗi nào thay cho null.\n"
-            "6. TUYỆT ĐỐI không chèn hội thoại, giải thích, lời chào (trả về đúng chuẩn JSON)."
+            "6. TUYỆT ĐỐI không chèn hội thoại, giải thích, lời chào (trả về đúng chuẩn JSON).\n\n"
+            f"JSON SCHEMA:\n{_schema}"
         )
-        logging.info(f"[LLMService] Connected to ollama at {host}, model: {model}")
+        logging.info(f"[LLMService] Connected to vLLM at {base_url}, model: {model}")
 
     def _make_chain(self, structured_llm):
         """Tạo LangChain chain với system prompt chung."""

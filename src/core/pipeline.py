@@ -113,12 +113,13 @@ class OCRPipeline:
             "result_tiff":  result_tiff,
         }  
 
+# Test end-to-end pipeline
 async def main():
     import time
     pipeline_client = OCRPipeline()
 
     ftime = time.time()
-    input_file = "../../data/raw/BA_05.2021.DS-ST.pdf"
+    input_file = "../../data/raw/BA_CHINH_NGUYEN VAN TRONG-MAI XUAN CUONG-PHAM VAN NHO.pdf"
 
     # end-to-end pipeline
     result = await pipeline_client.run_streaming(input_file)
