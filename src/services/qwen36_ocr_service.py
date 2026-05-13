@@ -18,10 +18,10 @@ from services.layout_ocr_service import LayoutOCRService, LayoutOCRConfig, TextB
 
 logger = logging.getLogger(__name__)
 
-SERVER_URL = os.getenv("QWEN36_OCR_URL", "https://vks-ocr-hvks.loca.lt")
+SERVER_URL = os.getenv("QWEN36_OCR_URL", "http://100.75.29.73:8008")
 MODEL_NAME = "Qwen/Qwen3.6-35B-A3B"
 OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "result_ocr"))
-_HEADERS   = {"bypass-tunnel-reminder": "true"}
+_HEADERS   = {}
 ZOOMIN     = 3
 _CROP_PAD  = 4
 

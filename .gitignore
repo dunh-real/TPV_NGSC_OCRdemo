@@ -52,3 +52,7 @@ src/services/*.txt
 
 # dependencies
 bin
+
+# IDE
+.agents/
+.codex/

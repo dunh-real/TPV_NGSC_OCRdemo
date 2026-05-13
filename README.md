@@ -75,9 +75,7 @@ TPV_NGSC_OCRdemo/
 │   ├── result_extract/              # JSON kết quả extract (structured data)
 │   ├── result_pdf/                  # PDF giữ bố cục gốc
 │   └── result_tiff/                 # TIFF multi-page
-├── qwen3.6_ocr_service.ipynb        # Notebook khởi động vLLM server
-├── test_pipeline.py                 # Test VietOCR + LLM extract
-├── test_qwen36_pipeline.py          # Test OCR + render PDF
+|
 ├── requirements.txt
 └── README.md
 ```
@@ -87,15 +85,13 @@ TPV_NGSC_OCRdemo/
 | File | Mục đích |
 |------|----------|
 | `src/core/pipeline.py` | Pipeline chính — `run()` (sync) và `run_streaming()` (async) |
-| `qwen3.6_ocr_service.ipynb` | Khởi động vLLM server (Colab) |
 
 ## Cấu hình
 
 | Biến môi trường | Mặc định | Mô tả |
 |---|---|---|
-| `QWEN36_OCR_URL` | `https://vks-ocr-hvks.loca.lt` | Endpoint vLLM server cho Qwen3.6 OCR |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server cho LLM extract |
-| `OLLAMA_MODEL` | `qwen2.5:14b` | Model Ollama dùng để extract |
+| `QWEN36_OCR_URL` | `https://<server-ip>:port` | Endpoint vLLM server cho Qwen3.6 OCR |
+| `VLLM_LLM_URL` | `http://<server-ip>:port/v1` | vLLM server cho LLM extract |
 
 ### Tham số pipeline
 
@@ -121,7 +117,7 @@ TPV_NGSC_OCRdemo/
 ### LLM Service (`llm_service.py`)
 
 1. **Pydantic Schema**: `DuLieuBanAn` → `ThongTinChungBanAn` + `List[HoSoDoiTuong]` (bao gồm `ThongTinKetAn`, `ThongTinBiCao`, `PhapNhanThuongMai`).
-2. **Sliding Window Extract**: Mỗi window gồm 2 trang liên tiếp (overlap=1), extract qua Ollama structured output.
+2. **Sliding Window Extract**: Mỗi window gồm 2 trang liên tiếp (overlap=1).
 3. **Smart Merge** (`_merge_results`):
    - `thong_tin_chung`: Deep merge — ghi đè null, giữ nguyên giá trị đã có.
    - `danh_sach_doi_tuong`: Deduplicate bằng composite key `(person_name, ngay_sinh, so_giay_to)`.

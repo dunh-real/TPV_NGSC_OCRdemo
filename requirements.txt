@@ -21,7 +21,7 @@ idna==3.11
 jinja2==3.1.6
 jsonpatch==1.33
 jsonpointer==3.1.1
-langchain-core==1.3.0
+langchain-core==1.3.2
 langchain-ollama==1.1.0
 langchain_openai==1.2.1
 langsmith==0.7.33
@@ -36,15 +36,17 @@ opencv-contrib-python==4.10.0.84
 opencv-python==4.11.0.86
 opencv-python-headless==4.11.0.86
 orjson==3.11.8
+onnxruntime-gpu==1.26.0
 packaging==26.1
 pdf2image==1.17.0
 pdfplumber==0.11.9
-pillow==12.1.1
+pillow==10.2.0
 psutil==7.2.2
 pydantic==2.13.1
 pydantic-core==2.46.1
 pygments==2.20.0
 pyyaml==6.0.3
+pyclipper==1.4.0
 qwen-vl-utils==0.0.14
 regex==2026.4.4
 reportlab==4.4.10
@@ -57,9 +59,6 @@ shellingham==1.5.4
 sympy==1.14.0
 tenacity==9.1.4
 tokenizers==0.22.2
-torch==2.11.0+cu128
-torchaudio==2.11.0+cu128
-torchvision==0.26.0+cu128
 tqdm==4.67.3
 transformers==5.5.4
 typer==0.24.1

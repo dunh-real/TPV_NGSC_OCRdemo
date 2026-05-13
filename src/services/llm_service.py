@@ -2,14 +2,15 @@ import asyncio
 import logging
 import os
 import json
+import re
+import unicodedata
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, field_validator
 from langchain_core.prompts import ChatPromptTemplate
 from typing import Optional, List
 
-VLLM_LLM_URL = os.getenv("VLLM_LLM_URL", "https://vks-llm-hvks.loca.lt/v1")
-VLLM_LLM_MODEL = os.getenv("VLLM_LLM_MODEL", "Qwen/Qwen2.5-14B-Instruct")
-_LLM_HEADERS = {"bypass-tunnel-reminder": "true"}
+VLLM_LLM_URL = os.getenv("VLLM_LLM_URL", "http://100.75.29.73:8008/v1")
+VLLM_LLM_MODEL = os.getenv("VLLM_LLM_MODEL", "Qwen/Qwen3.6-35B-A3B")
 
 class DiaChi(BaseModel):
     """Cấu trúc dùng chung cho các trường địa chỉ (Cấp tỉnh, huyện, xã, chi tiết)"""
@@ -142,11 +143,9 @@ class LLMService:
             temperature=0,
             max_tokens=4096,
             timeout=120,
-            default_headers=_LLM_HEADERS,
         )
         self.structured_llm = llm.with_structured_output(DuLieuBanAn, method="json_mode")
 
-        # Async pipeline (streaming, sliding window)
         stream_llm = ChatOpenAI(
             model=model,
             base_url=base_url,
@@ -154,7 +153,6 @@ class LLMService:
             temperature=0,
             max_tokens=4096,
             timeout=120,
-            default_headers=_LLM_HEADERS,
         )
         self.stream_structured_llm = stream_llm.with_structured_output(DuLieuBanAn, method="json_mode")
 
@@ -176,8 +174,11 @@ class LLMService:
             "TUYỆT ĐỐI KHÔNG điền tên người vào ten_toi_danh.\n"
             "4. phap_nhan_pham_toi chỉ dùng cho DOANH NGHIỆP/TỔ CHỨC bị xét xử. "
             "KHÔNG điền vai trò tố tụng (Nguyên đơn, Bị đơn, Người có quyền lợi nghĩa vụ liên quan) vào đây.\n"
-            "5. Nếu thông tin không có trong văn bản → null. Không bịa đặt. KHÔNG được ghi 'Không rõ', 'không xác định' hay bất kỳ chuỗi nào thay cho null.\n"
-            "6. TUYỆT ĐỐI không chèn hội thoại, giải thích, lời chào (trả về đúng chuẩn JSON).\n\n"
+            "5. dieu_khoan_luat_ap_dung chỉ chứa căn cứ pháp luật của đúng đối tượng đó. "
+            "Nếu cùng một căn cứ được nhắc lại bằng nhiều cách viết (VD: 'BLHS' và 'Bộ luật Hình sự') "
+            "thì chỉ trả một mục chuẩn, ưu tiên dạng cụ thể nhất có đủ điểm/khoản/điều.\n"
+            "6. Nếu thông tin không có trong văn bản → null. Không bịa đặt. KHÔNG được ghi 'Không rõ', 'không xác định' hay bất kỳ chuỗi nào thay cho null.\n"
+            "7. TUYỆT ĐỐI không chèn hội thoại, giải thích, lời chào (trả về đúng chuẩn JSON).\n\n"
             f"JSON SCHEMA:\n{_schema}"
         )
         logging.info(f"[LLMService] Connected to vLLM at {base_url}, model: {model}")
@@ -302,12 +303,45 @@ class LLMService:
 
     # Các chuỗi LLM hay bịa khi không tìm thấy thông tin
     _PLACEHOLDER_STRINGS = {"null", "không rõ", "không xác định", "n/a", "none"}
+    _LAW_CODE_PATTERNS = (
+        (re.compile(r"\bblhs\b|bộ\s+luật\s+hình\s+sự", re.I), "BLHS"),
+    )
+    _LAW_CLAUSE_RE = re.compile(
+        r"(?:(?:điểm|diem)\s+([a-zđ]))?\s*"
+        r"(?:(?:khoản|khoan)\s+(\d+[a-z]?))?\s*"
+        r"(?:điều|dieu)\s+(\d+[a-z]?)",
+        re.I,
+    )
 
     @classmethod
     def _normalize_name(cls, name: str) -> str:
-        """Chuẩn hóa tên: thống nhất dấu nháy Unicode về ASCII, strip, collapse spaces."""
+        """Chuẩn hóa tên thành key so sánh, không dùng làm giá trị hiển thị."""
         name = name.translate(cls._QUOTE_TABLE)
-        return " ".join(name.split())  # collapse multiple spaces
+        name = unicodedata.normalize("NFKC", name)
+        name = re.sub(r"[^\w\s]", " ", name, flags=re.UNICODE)
+        return " ".join(name.casefold().split())
+
+    @classmethod
+    def _normalize_date_key(cls, value: str | None) -> str | None:
+        """Chuẩn hóa ngày dạng d/m/yyyy thành dd/mm/yyyy để so key."""
+        if cls._is_null_value(value):
+            return None
+        value = unicodedata.normalize("NFKC", str(value))
+        m = re.search(r"\b(\d{1,2})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{2,4})\b", value)
+        if not m:
+            return " ".join(value.casefold().split())
+        day, month, year = m.groups()
+        if len(year) == 2:
+            year = f"19{year}"
+        return f"{int(day):02d}/{int(month):02d}/{year}"
+
+    @classmethod
+    def _normalize_id_key(cls, value: str | None) -> str | None:
+        """Chuẩn hóa số giấy tờ cho composite key."""
+        if cls._is_null_value(value):
+            return None
+        value = unicodedata.normalize("NFKC", str(value)).casefold()
+        return re.sub(r"\W+", "", value, flags=re.UNICODE) or None
 
     @classmethod
     def _is_null_value(cls, val) -> bool:
@@ -366,7 +400,11 @@ class LLMService:
             or (dt.get("bi_cao_nuoc_ngoai") or {}).get("so_giay_to")
         )
 
-        return (name, ngay_sinh, so_giay_to)
+        return (
+            name,
+            cls._normalize_date_key(ngay_sinh),
+            cls._normalize_id_key(so_giay_to),
+        )
 
     @classmethod
     def _keys_compatible(cls, key_a: tuple, key_b: tuple) -> bool:
@@ -432,10 +470,113 @@ class LLMService:
             elif isinstance(old_val, dict) and isinstance(new_val, dict):
                 cls._deep_merge_dict(old_val, new_val)
             elif isinstance(old_val, list) and isinstance(new_val, list):
-                for item in new_val:
-                    if item not in old_val:
-                        old_val.append(item)
+                base[key] = cls._merge_list_values(key, old_val, new_val)
             # old_val khác null, không phải dict/list → giữ nguyên
+
+    @classmethod
+    def _merge_list_values(cls, key: str, old_val: list, new_val: list) -> list:
+        if key == "dieu_khoan_luat_ap_dung":
+            return cls._normalize_law_clause_list([*old_val, *new_val])
+
+        merged = list(old_val)
+        seen = {
+            cls._normalize_generic_list_key(item)
+            for item in merged
+            if not cls._is_null_value(item)
+        }
+        for item in new_val:
+            if cls._is_null_value(item):
+                continue
+            item_key = cls._normalize_generic_list_key(item)
+            if item_key not in seen:
+                seen.add(item_key)
+                merged.append(item)
+        return merged
+
+    @classmethod
+    def _normalize_generic_list_key(cls, item) -> str:
+        if isinstance(item, str):
+            item = unicodedata.normalize("NFKC", item.translate(cls._QUOTE_TABLE))
+            return " ".join(item.casefold().split())
+        return json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+
+    @classmethod
+    def _detect_law_code(cls, text: str) -> str | None:
+        for pattern, code in cls._LAW_CODE_PATTERNS:
+            if pattern.search(text):
+                return code
+        return None
+
+    @classmethod
+    def _clean_law_text(cls, text: str) -> str:
+        text = unicodedata.normalize("NFKC", text.translate(cls._QUOTE_TABLE))
+        text = re.sub(r"\bbộ\s+luật\s+hình\s+sự\b", "BLHS", text, flags=re.I)
+        return " ".join(text.strip(" .;,").split())
+
+    @classmethod
+    def _format_law_clause(cls, code: str | None, dieu: str, khoan: str | None, diem: str | None) -> str:
+        parts = []
+        if diem and khoan:
+            parts.append(f"điểm {diem.casefold()}")
+        if khoan:
+            parts.append(f"khoản {khoan}")
+        parts.append(f"Điều {dieu}")
+        if code:
+            parts.append(code)
+        return " ".join(parts)
+
+    @classmethod
+    def _parse_law_clauses(cls, item: str) -> list[dict]:
+        text = cls._clean_law_text(str(item))
+        code = cls._detect_law_code(text)
+        clauses = []
+        for match in cls._LAW_CLAUSE_RE.finditer(text):
+            diem, khoan, dieu = match.groups()
+            clause_code = code or cls._detect_law_code(match.group(0))
+            display = cls._format_law_clause(clause_code, dieu, khoan, diem)
+            clauses.append({
+                "key": (clause_code, dieu.casefold(), khoan.casefold() if khoan else None, diem.casefold() if diem else None),
+                "group": (clause_code, dieu.casefold()),
+                "specific": bool(khoan or diem),
+                "display": display,
+            })
+        if clauses:
+            return clauses
+        return [{
+            "key": ("raw", cls._normalize_generic_list_key(text)),
+            "group": None,
+            "specific": False,
+            "display": text,
+        }]
+
+    @classmethod
+    def _normalize_law_clause_list(cls, values: list) -> list:
+        parsed = []
+        for item in values:
+            if cls._is_null_value(item):
+                continue
+            parsed.extend(cls._parse_law_clauses(str(item)))
+
+        groups_with_specific = {
+            clause["group"]
+            for clause in parsed
+            if clause["group"] is not None and clause["specific"]
+        }
+
+        result = []
+        seen = set()
+        for clause in parsed:
+            if (
+                clause["group"] is not None
+                and not clause["specific"]
+                and clause["group"] in groups_with_specific
+            ):
+                continue
+            if clause["key"] in seen:
+                continue
+            seen.add(clause["key"])
+            result.append(clause["display"])
+        return result
 
     @classmethod
     def _merge_results(cls, base: dict | None, partial: dict) -> dict:
@@ -480,16 +621,41 @@ class LLMService:
     @classmethod
     def _cleanup_result(cls, result: dict) -> dict:
         """Loại bỏ đối tượng rỗng và dọn string 'null' khỏi kết quả cuối."""
+        # Dọn string "null" → None trong toàn bộ result
+        cls._sanitize_null_strings(result)
+
         # Xóa đối tượng toàn null
         result["danh_sach_doi_tuong"] = [
             dt for dt in result.get("danh_sach_doi_tuong", [])
             if not cls._is_empty_doi_tuong(dt)
         ]
 
-        # Dọn string "null" → None trong toàn bộ result
-        cls._sanitize_null_strings(result)
+        result["danh_sach_doi_tuong"] = cls._coalesce_doi_tuong_list(
+            result.get("danh_sach_doi_tuong", [])
+        )
+        cls._normalize_result_lists(result)
 
         return result
+
+    @classmethod
+    def _coalesce_doi_tuong_list(cls, doi_tuong_list: list[dict]) -> list[dict]:
+        """Gom lại các đối tượng bị tách do khác hoa/thường hoặc thiếu thông tin phụ."""
+        merged: list[dict] = []
+        for dt in doi_tuong_list:
+            matched_idx = cls._find_matching_doi_tuong(merged, dt)
+            if matched_idx is not None:
+                cls._deep_merge_dict(merged[matched_idx], dt)
+            elif cls._get_person_name(dt) is not None:
+                merged.append(dt)
+        return merged
+
+    @classmethod
+    def _normalize_result_lists(cls, result: dict) -> None:
+        for dt in result.get("danh_sach_doi_tuong", []):
+            ket_an = dt.get("thong_tin_ket_an") or {}
+            laws = ket_an.get("dieu_khoan_luat_ap_dung")
+            if isinstance(laws, list):
+                ket_an["dieu_khoan_luat_ap_dung"] = cls._normalize_law_clause_list(laws)
 
     @classmethod
     def _sanitize_null_strings(cls, obj):
