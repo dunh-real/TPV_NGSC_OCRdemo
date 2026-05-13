@@ -12,7 +12,6 @@ from services.pdf_to_tiff_service import PdfToTiffService
 
 EXTRACT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "result_extract"))
 
-
 class OCRPipeline:
     def __init__(self):
         # VietOCR (layout/bbox) + Qwen3.6 (OCR text) tích hợp trong Qwen36OcrService
@@ -121,7 +120,7 @@ async def main():
     ftime = time.time()
     input_file = "../../data/raw/BA_CHINH_NGUYEN VAN TRONG-MAI XUAN CUONG-PHAM VAN NHO.pdf"
 
-    # end-to-end pipeline
+    # end-to-end streaming pipeline
     result = await pipeline_client.run_streaming(input_file)
 
     etime = time.time() - ftime
